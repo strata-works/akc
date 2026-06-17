@@ -6,6 +6,21 @@ This is the clean, maintained codebase split out from the reverse-engineering
 workspace. It contains the portable decoder only: no Windows COM hooks, no injected
 DLLs, and no forensic capture scripts.
 
+## Purpose and Disclaimer
+
+This project is for educational, archival, interoperability, and digital-preservation
+research. It is not affiliated with, endorsed by, or sponsored by Microsoft.
+
+The repository contains decoder tooling only. It does not grant any license to Encarta,
+Microsoft, or third-party copyrighted content, and users are responsible for ensuring
+they have the legal right to access, extract, transform, or redistribute any data they
+process with it. Do not use this project to bypass access controls or distribute
+copyrighted Encarta content without authorization.
+
+The software is provided as-is, without warranty of any kind. The maintainers are not
+responsible for misuse, data loss, legal claims, or other damages arising from use of
+this code.
+
 ## What Works
 
 - `CONT*.AKC`: article/content XML records
