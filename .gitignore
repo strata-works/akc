@@ -1,0 +1,21 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+build/
+dist/
+
+# Local extraction inputs/outputs. The Encarta data files are not part of this repo.
+scratch_data/
+output/
+dump/
+index/
+*.AKC
+*.akc
+*.EIT
+*.eit
+*.STE
+*.ste

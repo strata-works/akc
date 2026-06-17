@@ -1,0 +1,17 @@
+[project]
+name = "strata-akc-portable"
+version = "0.1.0"
+description = "Portable extractor for Microsoft Encarta 2009 AKC/LIT content records"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+strata-akc-dump = "strata_akc_dump.cli:main"
+strata-akc = "strata_akc_dump.cli:main"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["strata_akc_dump*", "lzxbuild*"]
