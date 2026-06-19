@@ -312,6 +312,11 @@ def decompress(data: bytes, uncomp_len: int) -> bytes:
                 block_type = bits.read(3)
                 block_len = (bits.read(16) << 8) | bits.read(8)
                 block_rem = block_len
+                if block_len == 0:
+                    # A zero-length block makes no forward progress; left unchecked
+                    # the frame loop spins forever. Real blocks are always non-empty,
+                    # so this signals corrupt/unsupported framing — fail, don't hang.
+                    raise ValueError("LZX: zero-length block (corrupt/unsupported framing)")
                 _s.debug_context = (
                     f"start_block={block_index} frame={frame_index} type={block_type} "
                     f"size={block_len} out={len(out)} bitpos={bits.raw_pos()} bits={bits._avail}"
