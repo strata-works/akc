@@ -8,18 +8,33 @@ import sys
 
 import os
 
+_LZX_BACKEND = None
+
+
 def _lzx():
+    global _LZX_BACKEND
+    if _LZX_BACKEND is not None:
+        return _LZX_BACKEND
     if os.environ.get('STRATA_USE_PY_LZX') != '1':
         try:
             from strata_akc_dump import mspack_lzx
-            return mspack_lzx
+            mspack_lzx._load()  # eager probe: raises if no external libmspack DLL is configured
+            _LZX_BACKEND = mspack_lzx
+            return _LZX_BACKEND
         except Exception as exc:
             if os.environ.get('STRATA_REQUIRE_MSPACK_LZX') == '1':
                 raise
-            print(f"[lit] libmspack LZX unavailable, falling back to Python decoder: {exc}", file=sys.stderr)
-    sys.path.insert(0, os.environ.get('LZX_PATH', os.path.join(os.path.dirname(__file__), '..', 'lzxbuild')))
+            print(f"[lit] mspack LZX shim unavailable, using lzxbuild backend: {exc}", file=sys.stderr)
+    # Prefer the native build (native/build/lzx.so, ~185x) if present; otherwise
+    # the pure-Python lzxbuild/lzx.py. (Kept in separate dirs so the pure-Python
+    # module is still importable by name for tests.)
+    here = os.path.dirname(__file__)
+    native = os.path.join(here, '..', 'native', 'build')
+    default = native if os.path.exists(os.path.join(native, 'lzx.so')) else os.path.join(here, '..', 'lzxbuild')
+    sys.path.insert(0, os.environ.get('LZX_PATH', default))
     import lzx as _mod
-    return _mod
+    _LZX_BACKEND = _mod
+    return _LZX_BACKEND
 
 DESENCRYPT_GUID = '{67F6E4A2-60BF-11D3-8540-00C04F58C3CF}'
 LZXCOMPRESS_GUID = '{0A9007C6-4076-11D3-8789-0000F8105754}'
