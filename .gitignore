@@ -5,6 +5,7 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 .venv/
+.venv-pypy/
 build/
 dist/
 
@@ -19,3 +20,4 @@ index/
 *.eit
 *.STE
 *.ste
+native/build/

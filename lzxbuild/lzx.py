@@ -126,8 +126,17 @@ class _Bits:
 # ── Huffman decoder ───────────────────────────────────────────────────────────
 
 class _HTree:
-    """Canonical Huffman decoder using bit-by-bit walk (correct for any code lengths)."""
-    __slots__ = ('_sym_map', '_max_l')
+    """Canonical Huffman decoder.
+
+    A primary lookup table (capped at ``PRIMARY_BITS``) decodes common short codes
+    in a single ``peek`` + index + ``drop``; rarer codes longer than the cap fall
+    back to a bit-by-bit walk. Byte-for-byte identical to the pure bit-by-bit
+    decoder, but avoids ~``max_l`` Python-level bit reads per symbol on the hot
+    path (the dominant cost in LZX decompression).
+    """
+    __slots__ = ('_sym_map', '_max_l', '_pbits', '_table')
+
+    PRIMARY_BITS = 12
 
     def __init__(self, lengths: list[int], n: int) -> None:
         ls = lengths[:n]
@@ -145,15 +154,41 @@ class _HTree:
             code = (code + count[bit_num - 1]) << 1
             next_code[bit_num] = code
 
+        pb = min(max_l, self.PRIMARY_BITS)
+        self._pbits = pb
+        # (sym, length); length 0 means "miss" -> long code, use the slow path.
+        table: list[tuple[int, int]] = [(0, 0)] * (1 << pb) if pb else []
         sym_map: dict[tuple[int, int], int] = {}
         for sym, length in enumerate(ls):
-            if length:
-                sym_map[(next_code[length], length)] = sym
-                next_code[length] += 1
+            if not length:
+                continue
+            c = next_code[length]
+            next_code[length] = c + 1
+            sym_map[(c, length)] = sym
+            if length <= pb:
+                span = pb - length
+                start = c << span
+                entry = (sym, length)
+                for i in range(start, start + (1 << span)):
+                    table[i] = entry
 
         self._sym_map = sym_map
+        self._table = table
 
     def decode(self, bits: _Bits) -> int:
+        pb = self._pbits
+        if pb:
+            try:
+                v = bits.peek(pb)
+            except EOFError:
+                return self._decode_slow(bits)
+            sym, length = self._table[v]
+            if length:
+                bits.drop(length)
+                return sym
+        return self._decode_slow(bits)
+
+    def _decode_slow(self, bits: _Bits) -> int:
         code = 0
         sym_map = self._sym_map
         for l in range(1, self._max_l + 1):
@@ -277,6 +312,11 @@ def decompress(data: bytes, uncomp_len: int) -> bytes:
                 block_type = bits.read(3)
                 block_len = (bits.read(16) << 8) | bits.read(8)
                 block_rem = block_len
+                if block_len == 0:
+                    # A zero-length block makes no forward progress; left unchecked
+                    # the frame loop spins forever. Real blocks are always non-empty,
+                    # so this signals corrupt/unsupported framing — fail, don't hang.
+                    raise ValueError("LZX: zero-length block (corrupt/unsupported framing)")
                 _s.debug_context = (
                     f"start_block={block_index} frame={frame_index} type={block_type} "
                     f"size={block_len} out={len(out)} bitpos={bits.raw_pos()} bits={bits._avail}"
@@ -334,11 +374,6 @@ def decompress(data: bytes, uncomp_len: int) -> bytes:
 
             run_left = this_run
             while run_left > 0:
-                _s.debug_context = (
-                    f"block={block_index - 1} frame={frame_index} out={len(out)} "
-                    f"frame_left={frame_goal - len(out)} run_left={run_left} "
-                    f"block_rem={block_rem} bitpos={bits.raw_pos()} bits={bits._avail}"
-                )
                 sym = mt.decode(bits)
 
                 if sym < _NUM_CHARS:
@@ -353,11 +388,6 @@ def decompress(data: bytes, uncomp_len: int) -> bytes:
                 pos_slot = sym >> 3
 
                 if len_hdr == _NUM_PRIMARY_LENGTHS:
-                    _s.debug_context = (
-                        f"length block={block_index - 1} frame={frame_index} out={len(out)} "
-                        f"run_left={run_left} block_rem={block_rem} bitpos={bits.raw_pos()} "
-                        f"bits={bits._avail} pos_slot={pos_slot}"
-                    )
                     length_footer = st.decode(bits)
                     match_len = _NUM_PRIMARY_LENGTHS + _MIN_MATCH + length_footer
                 else:
@@ -391,12 +421,23 @@ def decompress(data: bytes, uncomp_len: int) -> bytes:
                     raise ValueError("LZX: match overruns frame")
 
                 src = (wpos - match_pos) % wsize
-                for _ in range(match_len):
-                    b = window[src]
-                    window[wpos] = b
-                    out.append(b)
-                    src = (src + 1) % wsize
-                    wpos = (wpos + 1) % wsize
+                # Fast path: no window wrap and no self-overlap -> bulk slice copy,
+                # avoiding two modulos + an append per byte. Falls back to the
+                # byte-by-byte copy for wrapping or overlapping (RLE-style) matches.
+                if (match_pos >= match_len
+                        and src + match_len <= wsize
+                        and wpos + match_len <= wsize):
+                    seg = window[src:src + match_len]
+                    window[wpos:wpos + match_len] = seg
+                    out += seg
+                    wpos += match_len
+                else:
+                    for _ in range(match_len):
+                        b = window[src]
+                        window[wpos] = b
+                        out.append(b)
+                        src = (src + 1) % wsize
+                        wpos = (wpos + 1) % wsize
                 run_left -= match_len
 
         apply_intel_e8(frame_start, frame_size, produced)
