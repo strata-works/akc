@@ -35,17 +35,38 @@ not use the same AKC record codec.
 ## Platform
 
 The AKC decoder is pure Python and runs on Windows, macOS, and Linux with Python 3.10+.
+It has no compiled dependencies, so it installs unchanged under PyPy 3.10, which decodes
+the AKC record path roughly **25x faster** than CPython (byte-identical output) — worth it
+for bulk corpus builds.
 
-The LIT/EIT extractor needs an LZX backend. On Windows, the old workspace used a
-libmspack shim DLL. On macOS/Linux, set `STRATA_MSPACK_LZX_DLL` to a compatible
-`.dylib`/`.so` shim when you need known-good extraction.
+### LZX backend for LIT/EIT extraction
 
-`STRATA_USE_PY_LZX=1` forces the bundled pure-Python fallback. It is quiet, covered by
-format tests, and has been byte-checked against the native libmspack shim for the real
-Encarta `CATALOG.STE` catalog streams (`content.ecn`, `data.ecn`, and `baggage.ecs`)
-and representative main-content `.EIT` files (`MDSTD.EIT`, `MSWORLD.EIT`, and a
-`CONTENT/WORLD/7015` asset bundle). Keep a golden fixture in CI before relying on
-changes to this path.
+The LIT/EIT extractor needs an LZX decompressor. Three backends are supported;
+`lit._lzx()` selects among them in this order:
+
+1. **Native (preferred).** A small C extension vendored from calibre/libmspack lives in
+   `native/lzx/`. Build it once:
+
+   ```bash
+   PYTHON=python bash native/lzx/build.sh
+   ```
+
+   That compiles `native/build/lzx.so` (arch-native, gitignored). When the file exists,
+   `lit._lzx()` prefers it automatically — roughly **185x faster** than the pure-Python
+   fallback and byte-identical (a 168 MB container drops from minutes to ~5s). The
+   pure-Python module stays importable (it lives in its own `lzxbuild/` dir).
+
+2. **libmspack shim DLL/dylib.** Set `STRATA_MSPACK_LZX_DLL` to a compatible
+   `.dll`/`.dylib`/`.so` shim to extract through the original libmspack (the old Windows
+   workspace used this).
+
+3. **Pure-Python fallback.** `STRATA_USE_PY_LZX=1` forces the bundled pure-Python LZX
+   (`lzxbuild/lzx.py`), overriding the native backend. It is quiet, covered by format
+   tests, and has been byte-checked against the native libmspack shim for the real
+   Encarta `CATALOG.STE` catalog streams (`content.ecn`, `data.ecn`, and `baggage.ecs`)
+   and representative main-content `.EIT` files (`MDSTD.EIT`, `MSWORLD.EIT`, and a
+   `CONTENT/WORLD/7015` asset bundle). Keep a golden fixture in CI before relying on
+   changes to this path.
 
 Some support/dictionary `.EIT` containers still need separate LIT reset/framing work:
 `TIMELINE.EIT`, `MINDMAZE.EIT`, and `EDICT/ENG_FRA.EIT` currently fail in the shared
@@ -127,5 +148,7 @@ libmspack shim.
 
 ## License Note
 
-`lit.py` derives from calibre's GPLv3 LIT reader. Keep downstream distribution choices
-aligned with that license. The extracted data is separate from this extractor code.
+`lit.py` and the native LZX backend (`native/lzx/`, vendored from calibre/libmspack)
+derive from GPLv3 sources, and the pure-Python `lzxbuild/lzx.py` shares that lineage.
+Keep downstream distribution choices aligned with GPLv3. The extracted data is separate
+from this extractor code.
