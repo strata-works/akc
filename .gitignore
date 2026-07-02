@@ -21,3 +21,4 @@ index/
 *.STE
 *.ste
 native/build/
+.superpowers/
